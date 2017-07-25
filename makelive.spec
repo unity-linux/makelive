@@ -8,7 +8,9 @@ License:	GPL
 URL:		unity-linux
 Source0:	%{name}-%{version}.tar.gz
 
-Requires:	unity-conf cdrkit	
+Requires:	cdrkit
+Requires:	drakx-installer-images
+Requires:	memtest86+
 
 %description
 Test Package

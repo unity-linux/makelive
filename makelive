@@ -7,10 +7,10 @@
 prog_name=`basename "$0"`
 
 # check kernel release
-function get_src_kernel_rel 
+function get_kernel_rel 
 {
-	if [[ -n "$kernel_rel" ]]; then
-		rel=$(ls -1 $1/lib/modules/)
+	if [ -z "$kernel_rel" ]; then
+		rel=$(readlink $1/boot/vmlinuz |cut -d '-' -f2-4)
 		[ "$(echo $rel | wc -w )" -ne 1 ] && echo "Can't read kernel release in $1 (found: $rel)" && return 1
 		echo $rel
 	fi
@@ -20,7 +20,7 @@ function copy_module
 {
 	for modname in $@
 	do
-		module_with_deps=$(grep -P "/$modname.ko(.gz)?:" $sys_source/lib/modules/$kernel_rel/modules.dep | sed -e s/:// )
+		module_with_deps=$(grep -P "/$modname.ko(.xz)?:" $sys_source/lib/modules/$kernel_rel/modules.dep | sed -e s/:// )
 		[ -z  "$module_with_deps" ] && module_with_deps=$modname && echo "No entries found in modules.dep for $modname"
 		for modpath in $module_with_deps
 		do
@@ -174,6 +174,102 @@ function find_copy_busybox
 		echo "copying busybox: $bbox_bin"
                 cp -df $bbox_bin $1
 		fi
+
+}
+
+
+function write_isolinux_cfg
+{
+
+cat >> $tmp_iso_root/isolinux/isolinux.cfg << EOF
+default vesamenu.c32
+timeout 50
+menu background splash.jpg
+menu autoboot Starting Livecd in # second{,s}. Press any key to interrupt.
+
+menu clear
+menu title Livecd
+menu vshift 10
+menu rows 18
+menu margin 8
+#menu hidden
+menu helpmsgrow 15
+menu tabmsgrow 13
+
+menu color border * #00000000 #00000000 none
+menu color sel 0 #ffffffff #00000000 none
+menu color title 0 #ff7ba3d0 #00000000 none
+menu color tabmsg 0 #ff3a6496 #00000000 none
+menu color unsel 0 #84b8ffff #00000000 none
+menu color hotsel 0 #84b8ffff #00000000 none
+menu color hotkey 0 #ffffffff #00000000 none
+menu color help 0 #ffffffff #00000000 none
+menu color scrollbar 0 #ffffffff #ff355594 none
+menu color timeout 0 #ffffffff #00000000 none
+menu color timeout_msg 0 #ffffffff #00000000 none
+menu color cmdmark 0 #84b8ffff #00000000 none
+menu color cmdline 0 #ffffffff #00000000 none
+
+menu tabmsg Press Tab for full configuration options on menu items.
+menu separator
+menu separator
+label linux0
+  menu label ^Start Livecd
+  kernel vmlinuz
+  append initrd=initrd.img livecd quiet ramdisk_size=512000
+  menu default
+menu separator
+menu begin ^Troubleshooting
+  menu title Troubleshooting
+label basic0
+  menu label Start Livecd in ^basic graphics mode.
+  kernel vmlinuz
+  append initrd=initrd.img livecd quiet xdriver=vesa nomodeset ramdisk_size=256000
+  text help
+      Try this option out if you're having trouble installing Unity Livecd.
+  endtext
+label check0
+  menu label ^Test this media & start Livecd
+  kernel vmlinuz
+  append initrd=initrd.img quiet rd.live.check
+label memtest
+  menu label Run a ^memory test.
+  text help
+    If your system is having issues, a problem with your
+    system's memory may be the cause. Use this utility to
+    see if the memory is working correctly.
+  endtext
+  kernel memtest
+menu separator
+label local
+  menu label Boot from ^local drive
+  localboot 0xffff
+menu separator
+label returntomain
+  menu label Return to ^main menu.
+  menu exit
+menu end
+EOF
+
+}
+
+function write_help_msg
+{
+
+cat >> $tmp_iso_root/isolinux/help.msg << EOF
+This is a Live CD project to let you
+test a distro without installing it to your
+hard drive. It is also useful for rescuing
+damaged systems.
+
+In case boot troubles try following args:
+ noapic        Disable the "Advanced Programmable Interrupt Controller"
+ noacpi        This parameter disables the whole ACPI system
+ debuginitrd   Run debug shell after initrd process
+
+
+press any key to return to menu
+EOF
 
 }
 
@@ -371,6 +467,8 @@ do
 			bootsplash_arg=1
 			bootsplash=$(echo $arg | sed 's/.*bootsplash=//;s/--.*//')
 			;;
+		--menutheme=*)
+			menutheme=$(echo $arg | sed 's/.*menutheme=//;s/--.*//') ;;
 		-h|--help)
 			print_help
 			exit 0
@@ -407,7 +505,8 @@ tmp_iso_root=$(mktemp -d /tmp/$(basename $0)_tmp_iso__XXXXXX)
 tmp_initrd=$(mktemp -d /tmp/$(basename $0)_tmp_initrd__XXXXXX)
 volid_file=$tmp_initrd/DEV_LABEL
 live_rootfs_archive=squashfs.img
-kernel_rel=$(get_src_kernel_rel $1)
+kernel_rel=$(get_kernel_rel)
+echo $kernel_rel
 [ $? -ne 0 ] && die "Kernel release not found: "$kernel_rel
 
 echo "::: $prog_name :::"	 
@@ -440,6 +539,8 @@ fi
 echo "Copying kernel and basic tools..."
 #cp -r $mkroot/$templatesDir/isolinux $tmp_iso_root
 mkdir -p $tmp_iso_root/isolinux
+write_isolinux_cfg
+write_help_msg
 cp /usr/*/syslinux/ldlinux.c32 $tmp_iso_root/isolinux/
 cp /usr/*/syslinux/libcom32.c32 $tmp_iso_root/isolinux/
 cp /usr/*/syslinux/libutil.c32 $tmp_iso_root/isolinux/
@@ -448,11 +549,16 @@ cp /usr/*/syslinux/hdt.c32 $tmp_iso_root/isolinux/
 cp /usr/*/syslinux/isolinux.bin $tmp_iso_root/isolinux/
 cp /usr/*/syslinux/reboot.c32 $tmp_iso_root/isolinux/
 cp /usr/*/syslinux/vesamenu.c32 $tmp_iso_root/isolinux/
-cp /usr/share/makelive/isolinux.cfg $tmp_iso_root/isolinux/
-cp /usr/share/makelive/splash.jpg $tmp_iso_root/isolinux/
+if [ -d /usr/share/gfxboot/themes/"$menutheme"/ ]; then
+   cp /usr/share/gfxboot/themes/"$menutheme"/welcome.jpg $tmp_iso_root/isolinux/splash.jpg
+fi
 cp /usr/share/makelive/help.msg $tmp_iso_root/isolinux/
-cp /usr/share/makelive/memtest86 $tmp_iso_root/isolinux/
-cp /usr/share/hwdata/pci.ids $tmp_iso_root/isolinux
+if [ -f /boot/memtest.bin ]; then
+   cp /boot/memtest.bin $tmp_iso_root/isolinux/memtest86
+fi
+if [ -f /usr/share/pci.ids ]; then
+   cp /usr/share/pci.ids $tmp_iso_root/isolinux
+fi
 
 
 if [ -f $sys_source/boot/vmlinuz-$(echo $kernel_rel) ]; then
@@ -473,7 +579,7 @@ mkdir -p $tmp_iso_root/LiveOS/
 #cp -f $mkroot/$templatesDir/synergy-install-gui $sys_source/usr/sbin/
 #cp -f $mkroot/$templatesDir/auto-part $sys_source/usr/sbin/
 
-mksquashfs  $sys_source $tmp_iso_root/LiveOS/$live_rootfs_archive -comp $squashfscompr -e /tmp -e /root/rpms -e /root/rpmbuild -e /root/packages -e /root/building -e /proc/ -e /sys/ -e /dev/ -e /run/ > /dev/null || die "Creating live rootfs failed"
+mksquashfs  $sys_source $tmp_iso_root/LiveOS/$live_rootfs_archive -comp $squashfscompr -e /tmp -e /root/rpms -e /root/rpmbuild -e /root/packages -e /root/building -e /proc/ -e /sys/ -e /dev/ -e /run/ -info -progress || die "Creating live rootfs failed"
 echo "Creating ISO image: $dst_iso ($VOLID)..."
 mkisofs -o $dst_iso --publisher "Unity Linux" -b isolinux/isolinux.bin -c isolinux/boot.cat \
 	-no-emul-boot -boot-load-size 4 -boot-info-table -l -R \

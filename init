@@ -219,8 +219,8 @@ if [ -z "$livecd" ]; then
 	do
         	mount $device $union_dir
         	echo "Mounted device: $device"
-        	if [ -f "$union_dir/etc/unity-release" ]; then
-                	echo "Found unity-release on $device"
+        	if [ "$(ls -A $union_dir/etc/)" ]; then
+                	echo "Found filesystem on $device"
                 	break
         	else
 			echo "Not found on $device"
@@ -229,7 +229,7 @@ if [ -z "$livecd" ]; then
 	done
 
         #echo "Do we have a device mounted, ready to use?"                                                         
-        if [ -f "$union_dir/etc/unity-release" ]; then                                                                       
+        if [ "$(ls -A $union_dir/etc/)" ]; then                                                                       
                 echo "We do and we are attempting to use: $device"                                                 
         else                                                                                                       
                 echo "Oh no!: Nothing is ready to use"                                                             
