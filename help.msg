@@ -1,5 +1,5 @@
-Unity Live th is a Live CD project to let you
-test Unity Linux without installing it to your
+This is a Live CD project to let you
+test a distro without installing it to your
 hard drive. It is also useful for rescuing
 damaged systems.
 
